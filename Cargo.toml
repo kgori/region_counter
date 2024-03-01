@@ -1,0 +1,13 @@
+[package]
+name = "region_counter"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+clap = { version = "4.5.1", features = ["derive"] }
+csv = "1.3.0"
+flate2 = "1.0.28"
+pdatastructs = "0.7.0"
+rust-htslib = { version = "0.45.0", features = ["bzip2", "lzma"], default-features = false }
