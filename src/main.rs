@@ -96,7 +96,6 @@ fn count_reads(
                             break;
                         }
                         if check_cigar_overlap(&read, region.start, region.end) {
-                            println!("{}", read_name);
                             exon_reads_set.insert(read_name);
                             break;
                         }
