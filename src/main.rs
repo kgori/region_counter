@@ -8,6 +8,9 @@ use pdatastructs::hyperloglog::HyperLogLog;
 use regions::{compress_regions, convert_regions_vec_to_hashmap, Region};
 use rust_htslib::bam::{IndexedReader, Read, Reader, Record};
 use std::collections::{HashMap, HashSet};
+use std::io::Write;
+use rayon::prelude::*;
+use anyhow::Error;
 
 const ADDRESSBITS: usize = 18;
 
@@ -49,7 +52,7 @@ fn count_reads(
     chrom: &str,
     regions: &Vec<Region>,
     args: &ProgramOptions,
-) -> Result<(usize, usize), Box<dyn std::error::Error>> {
+) -> Result<(usize, usize), Error> {
     // Only count unique reads
     let mut all_reads_set = HashSet::new();
     let mut exon_reads_set = HashSet::new();
@@ -94,17 +97,22 @@ fn count_reads(
 fn count_mapped_reads(
     args: &ProgramOptions,
     regions: &HashMap<String, Vec<Region>>,
-) -> Result<(usize, usize), Box<dyn std::error::Error>> {
+) -> Result<(usize, usize), Error> {
     let mut all_reads = 0;
     let mut exon_reads = 0;
     
     let mut chroms: Vec<_> = regions.keys().collect();
     chroms.sort();
 
-    for chrom in chroms {
-        println!("Processing chromosome: {}", chrom);
-        let regions = regions.get(chrom).unwrap();
-        let (all, exon) = count_reads(chrom, regions, args)?;
+    let stdout_ref = &std::io::stdout();
+    let results: Vec<Result<(usize, usize), Error>> = chroms.par_iter().map(|chrom| {
+        println!("Counting reads on chromosome {}", chrom);
+        let regions = regions.get(*chrom).unwrap();
+        count_reads(chrom, regions, args)
+    }).collect();
+
+    for result in results {
+        let (all, exon) = result?;
         all_reads += all;
         exon_reads += exon;
     }
@@ -112,7 +120,7 @@ fn count_mapped_reads(
     Ok((all_reads, exon_reads))
 }
 
-fn count_unmapped_reads(args: &ProgramOptions) -> Result<usize, Box<dyn std::error::Error>> {
+fn count_unmapped_reads(args: &ProgramOptions) -> Result<usize, Error> {
     let mut bam = IndexedReader::from_path(&args.bamfile).unwrap();
     bam.fetch("*")?;
     let mut read = Record::new();
@@ -131,7 +139,7 @@ fn count_unmapped_reads(args: &ProgramOptions) -> Result<usize, Box<dyn std::err
     Ok(unmapped.len())
 }
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+fn main() -> Result<(), Error> {
     let args = cli::parse_cli();
     let gtf = io::GtfFile::new(&args.gtf);
     println!("Reading GTF file: {}", args.gtf.display());
