@@ -1,10 +1,10 @@
+use crate::regions::{sort_regions_in_place, Region};
 use csv::Reader;
 use flate2::read::MultiGzDecoder;
 use std::error::Error;
 use std::fs::File;
 use std::io::BufReader;
 use std::path::PathBuf;
-use crate::regions::{Region, sort_regions_in_place};
 
 pub struct GtfFile {
     pub path: PathBuf,
@@ -28,6 +28,9 @@ impl GtfFile {
         Ok(csv_reader)
     }
 
+    // Selects regions marked as "exon", transforms their coordinates into
+    // 0-based, half-open intervals, sorts them by chromosome and position,
+    // and returns them as a vector of Region structs.
     pub fn exon_regions(&self) -> Result<Vec<Region>, Box<dyn Error>> {
         let mut regions = vec![];
         let mut reader = self.reader()?;
@@ -36,7 +39,7 @@ impl GtfFile {
             if &record[2] == "exon" {
                 regions.push(Region {
                     seqname: record[0].to_string(),
-                    start: record[3].parse()?,
+                    start: (record[3].parse::<i64>()?) - 1i64,
                     end: record[4].parse()?,
                 });
             }
