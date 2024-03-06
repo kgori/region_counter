@@ -1,6 +1,4 @@
 #![allow(unused_imports)]
-#![allow(unused_variables)]
-#![allow(unused_mut)]
 #![allow(dead_code)]
 use cigar::check_cigar_overlap;
 use cli::ProgramOptions;
@@ -61,8 +59,8 @@ fn count_reads(
     let mut read = Record::new();
     bam.fetch(chrom)?;
 
-    let mut regions_iterator = regions.iter().peekable();
-    let mut current_region = regions_iterator.next();
+    let mut current_region_index = 0;
+    let max_index = regions.len();
 
     while let Some(result) = bam.read(&mut read) {
         match result {
@@ -75,16 +73,33 @@ fn count_reads(
                 let read_name = get_read_name(&read);
                 all_reads_set.insert(read_name.clone());
 
-                while let Some(region) = current_region {
-                    while read.pos() >= region.end && current_region.is_some() {
-                        current_region = regions_iterator.next();
+                // Check if the read is past the end of the current region
+                // If it is, advance to the next region as long as there are regions left
+                loop {
+                    if current_region_index >= max_index {
+                        break;
                     }
-                    break;
+                    let region = &regions[current_region_index];
+                    if read.pos() >= region.end {
+                        current_region_index += 1;
+                    } else {
+                        break;
+                    }
                 }
 
-                if let Some(region) = current_region {
-                    if check_cigar_overlap(&read, region.start, region.end) {
-                        exon_reads_set.insert(read_name);
+                // If there still is a current region, check if the read overlaps it
+                if current_region_index < max_index {
+                    let end_pos = cigar::cigar_end_pos(&read);
+                    for index in current_region_index..max_index {
+                        let region = &regions[index];
+                        if region.start > end_pos {
+                            break;
+                        }
+                        if check_cigar_overlap(&read, region.start, region.end) {
+                            println!("{}", read_name);
+                            exon_reads_set.insert(read_name);
+                            break;
+                        }
                     }
                 }
             }
@@ -104,7 +119,6 @@ fn count_mapped_reads(
     let mut chroms: Vec<_> = regions.keys().collect();
     chroms.sort();
 
-    let stdout_ref = &std::io::stdout();
     let results: Vec<Result<(usize, usize), Error>> = chroms.par_iter().map(|chrom| {
         println!("Counting reads on chromosome {}", chrom);
         let regions = regions.get(*chrom).unwrap();

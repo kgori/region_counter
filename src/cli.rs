@@ -21,7 +21,6 @@ pub struct ProgramOptions {
     pub filtered_flag: u16,
 }
 
-#[allow(dead_code)]
 fn validate_file(file: &Path) {
     if !file.exists() {
         let mut cmd = ProgramOptions::command();
