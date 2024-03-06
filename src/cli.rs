@@ -17,7 +17,7 @@ pub struct ProgramOptions {
     #[arg(short = 'f', long, default_value = "3")]
     pub required_flag: u16,
 
-    #[arg(short = 'F', long, default_value = "3852")]
+    #[arg(short = 'F', long, default_value = "2816")]
     pub filtered_flag: u16,
 }
 
