@@ -2,7 +2,7 @@ use clap::error::ErrorKind;
 use clap::{CommandFactory, Parser};
 use std::path::{Path, PathBuf};
 
-#[derive(Parser, Debug)]
+#[derive(Parser, Debug, Clone)]
 #[command(version, about, long_about = None)]
 pub struct ProgramOptions {
     #[arg(short, long)]

@@ -1,31 +1,20 @@
-#![allow(unused_imports)]
-#![allow(dead_code)]
 use cigar::check_cigar_overlap;
 use cli::ProgramOptions;
-use pdatastructs::hyperloglog::HyperLogLog;
 use regions::{compress_regions, convert_regions_vec_to_hashmap, Region};
 use rust_htslib::bam::{IndexedReader, Read, Reader, Record};
-use std::collections::{HashMap, HashSet};
-use std::io::Write;
+use std::collections::HashMap;
 use rayon::prelude::*;
 use anyhow::Error;
-
-const ADDRESSBITS: usize = 18;
 
 mod cigar;
 mod cli;
 mod io;
 mod regions;
 
-fn get_read_name(read: &Record) -> String {
-    let mut read_name = std::str::from_utf8(read.qname()).unwrap().to_owned();
-    if read.is_first_in_template() {
-        read_name.push_str("/1");
-    } else if read.is_last_in_template() {
-        read_name.push_str("/2");
-    }
-    read_name
-}
+const FLAGS_ALWAYS_FILTERED: u16 = 2816;
+const FLAG_PROPER_PAIR: u16 = 2;
+const FLAG_UNMAPPED: u16 = 4;
+const FLAGS_MAPPING_RELATED: u16 = 63;
 
 enum ReadCheckOutcome {
     Accept,
@@ -57,14 +46,21 @@ fn get_chrom_names(bamfile: &std::path::Path) -> Result<Vec<String>, Error> {
     }
 }
 
+struct CountResult {
+    accepted: usize,
+    rejected: usize,
+}
+
 fn count_reads(
     chrom: &str,
     regions: &Vec<Region>,
     args: &ProgramOptions,
-) -> Result<(usize, usize), Error> {
+) -> Result<(CountResult, CountResult), Error> {
     // Only count unique reads
-    let mut all_reads_set = HashSet::new();
-    let mut exon_reads_set = HashSet::new();
+    let mut all_reads_accepted = 0;
+    let mut exon_reads_accepted = 0;
+    let mut all_reads_rejected = 0;
+    let mut exon_reads_rejected = 0;
 
     let mut bam = IndexedReader::from_path(&args.bamfile)?;
     let mut read = Record::new();
@@ -76,13 +72,21 @@ fn count_reads(
     while let Some(result) = bam.read(&mut read) {
         match result {
             Ok(_) => {
-                match check_read(&read, args) {
-                    ReadCheckOutcome::Reject => continue,
-                    ReadCheckOutcome::Accept => {},
+
+                if read.flags() & FLAGS_ALWAYS_FILTERED != 0 {
+                    continue;
                 }
 
-                let read_name = get_read_name(&read);
-                all_reads_set.insert(read_name.clone());
+                let read_check_outcome = check_read(&read, args);
+
+                match read_check_outcome {
+                    ReadCheckOutcome::Accept => {
+                        all_reads_accepted += 1;
+                    }
+                    ReadCheckOutcome::Reject => {
+                        all_reads_rejected += 1;
+                    }
+                }
 
                 // Check if the read is past the end of the current region
                 // If it is, advance to the next region as long as there are regions left
@@ -107,7 +111,14 @@ fn count_reads(
                             break;
                         }
                         if check_cigar_overlap(&read, region.start, region.end) {
-                            exon_reads_set.insert(read_name);
+                            match read_check_outcome {
+                                ReadCheckOutcome::Accept => {
+                                    exon_reads_accepted += 1;
+                                }
+                                ReadCheckOutcome::Reject => {
+                                    exon_reads_rejected += 1;
+                                }
+                            }
                             break;
                         }
                     }
@@ -116,57 +127,85 @@ fn count_reads(
             Err(e) => println!("Error reading read: {}", e),
         }
     }
-    Ok((all_reads_set.len(), exon_reads_set.len()))
+    let mapped_result = CountResult {
+        accepted: all_reads_accepted,
+        rejected: all_reads_rejected,
+    };
+    let exon_result = CountResult {
+        accepted: exon_reads_accepted,
+        rejected: exon_reads_rejected,
+    };
+    Ok((mapped_result, exon_result))
 }
 
 fn count_mapped_reads(
     args: &ProgramOptions,
     regions: &HashMap<String, Vec<Region>>,
-) -> Result<(usize, usize), Error> {
-    let mut all_reads = 0;
-    let mut exon_reads = 0;
+) -> Result<(CountResult, CountResult), Error> {
+    let mut all_reads = CountResult { accepted: 0, rejected: 0 };
+    let mut exon_reads = CountResult { accepted: 0, rejected: 0 };
     
     let mut chroms: Vec<_> = regions.keys().collect();
     chroms.sort();
 
-    let results: Vec<Result<(usize, usize), Error>> = chroms.par_iter().map(|chrom| {
-        println!("Counting reads on chromosome {}", chrom);
+    let results: Vec<Result<(CountResult, CountResult), Error>> = chroms.par_iter().map(|chrom| {
+        eprintln!("Counting reads on chromosome {}", chrom);
         let regions = regions.get(*chrom).unwrap();
         count_reads(chrom, regions, args)
     }).collect();
 
     for result in results {
         let (all, exon) = result?;
-        all_reads += all;
-        exon_reads += exon;
+        all_reads.accepted += all.accepted;
+        all_reads.rejected += all.rejected;
+        exon_reads.accepted += exon.accepted;
+        exon_reads.rejected += exon.rejected;
     }
 
     Ok((all_reads, exon_reads))
 }
 
-fn count_unmapped_reads(args: &ProgramOptions) -> Result<usize, Error> {
+fn count_unmapped_reads(args: &ProgramOptions) -> Result<CountResult, Error> {
+    let mut args: ProgramOptions = args.clone();
+    args.minmapqual = 0;
+    args.required_flag ^= args.required_flag & FLAG_PROPER_PAIR; // Turn off mapping requirement
+    args.required_flag ^= FLAG_UNMAPPED; // Turn on unmapped requirement
+    args.filtered_flag ^= args.filtered_flag & FLAGS_MAPPING_RELATED; // Turn off mapping related flags
     let mut bam = IndexedReader::from_path(&args.bamfile).unwrap();
     bam.fetch("*")?;
     let mut read = Record::new();
-    let mut unmapped = HashSet::new();
+    let mut unmapped_accepted = 0;
+    let mut unmapped_rejected = 0;
     while let Some(result) = bam.read(&mut read) {
         match result {
             Ok(_) => {
-                if read.is_unmapped() && !read.is_quality_check_failed() && !read.is_duplicate() {
-                    let read_name = get_read_name(&read);
-                    unmapped.insert(read_name);
+                if read.flags() & FLAGS_ALWAYS_FILTERED != 0 {
+                    continue;
+                }
+
+                let read_check_outcome = check_read(&read, &args);
+                match read_check_outcome {
+                    ReadCheckOutcome::Accept => {
+                        unmapped_accepted += 1;
+                    }
+                    ReadCheckOutcome::Reject => {
+                        unmapped_rejected += 1;
+                    }
                 }
             }
             Err(e) => println!("Error reading read: {}", e),
         }
     }
-    Ok(unmapped.len())
+    Ok(CountResult {
+        accepted: unmapped_accepted,
+        rejected: unmapped_rejected,
+    })
 }
 
 fn main() -> Result<(), Error> {
     let args = cli::parse_cli();
     let gtf = io::GtfFile::new(&args.gtf);
-    println!("Reading GTF file: {}", args.gtf.display());
+    eprintln!("Reading GTF file: {}", args.gtf.display());
     let regions = gtf.exon_regions()?;
     let regions = compress_regions(&regions);
     let mut regions_map = convert_regions_vec_to_hashmap(regions);
@@ -182,11 +221,18 @@ fn main() -> Result<(), Error> {
             regions_map.insert(chrom, Vec::new());
         }
     }
-    println!("Counting {} exon regions on {} chromosomes", n_regions, regions_map.len());
+    eprintln!("Counting {} exon regions on {} chromosomes", n_regions, regions_map.len());
     let (all_reads, exon_reads) = count_mapped_reads(&args, &regions_map)?;
     let unmapped_reads = count_unmapped_reads(&args)?;
-    println!("{} total mapped reads", all_reads);
-    println!("{} exon mapped reads", exon_reads);
-    println!("{} unmapped reads", unmapped_reads);
+    println!("## Min mapping quality: {}", args.minmapqual);
+    println!("## Required flag: {}", args.required_flag);
+    println!("## Filtered flag: {}", args.filtered_flag);
+    println!("## GTF file: {}", args.gtf.display());
+    println!("## BAM file: {}", args.bamfile.display());
+    println!("Category\tAccepted\tRejected\tTotal");
+    println!("Exon\t{}\t{}\t{}", exon_reads.accepted, exon_reads.rejected, exon_reads.accepted + exon_reads.rejected);
+    println!("Mapped\t{}\t{}\t{}", all_reads.accepted, all_reads.rejected, all_reads.accepted + all_reads.rejected);
+    println!("Unmapped\t{}\t{}\t{}", unmapped_reads.accepted, unmapped_reads.rejected, unmapped_reads.accepted + unmapped_reads.rejected);
+    println!("Total\t{}\t{}\t{}", all_reads.accepted + unmapped_reads.accepted, all_reads.rejected + unmapped_reads.rejected, all_reads.accepted + all_reads.rejected + unmapped_reads.accepted + unmapped_reads.rejected);
     Ok(())
 }

@@ -1,4 +1,4 @@
-use rust_htslib::bam::{IndexedReader, Read, Reader, Record};
+use rust_htslib::bam::Record;
 
 pub(crate) fn cigar_end_pos(record: &Record) -> i64 {
     let mut pos = record.pos() as i64; // 0-based position of the read
