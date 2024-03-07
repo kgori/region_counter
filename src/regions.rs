@@ -7,7 +7,7 @@ pub struct Region {
     pub end: i64,
 }
 
-pub fn sort_regions_in_place(regions: &mut Vec<Region>) {
+pub fn sort_regions_in_place(regions: &mut [Region]) {
     regions.sort_by(|a, b| {
         a.seqname
             .cmp(&b.seqname)
@@ -16,7 +16,7 @@ pub fn sort_regions_in_place(regions: &mut Vec<Region>) {
     });
 }
 
-pub fn compress_regions(regions: &Vec<Region>) -> Vec<Region> {
+pub fn compress_regions(regions: &[Region]) -> Vec<Region> {
     let mut compressed = vec![];
     let mut current = regions[0].clone();
     for region in regions.iter().skip(1) {

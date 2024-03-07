@@ -1,7 +1,7 @@
 use rust_htslib::bam::Record;
 
 pub(crate) fn cigar_end_pos(record: &Record) -> i64 {
-    let mut pos = record.pos() as i64; // 0-based position of the read
+    let mut pos = record.pos(); // 0-based position of the read
 
     for cigar in record.cigar().iter() {
         let len = cigar.len() as i64;
@@ -17,7 +17,7 @@ pub(crate) fn cigar_end_pos(record: &Record) -> i64 {
 // Function to check if there's an overlap between the read (based on CIGAR) and an interval
 // The interval is 0-based, half-open, i.e. [start, end)
 pub(crate) fn check_cigar_overlap(record: &Record, interval_start: i64, interval_end: i64) -> bool {
-    let mut pos = record.pos() as i64; // 0-based position of the read
+    let mut pos = record.pos(); // 0-based position of the read
 
     for cigar in record.cigar().iter() {
         let len = cigar.len() as i64;

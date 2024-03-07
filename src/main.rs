@@ -220,12 +220,10 @@ fn main() -> Result<(), Error> {
     let regions = gtf.exon_regions()?;
     let regions = compress_regions(&regions);
     let mut regions_map = convert_regions_vec_to_hashmap(regions);
-    let n_regions = regions_map.iter().map(|(_, v)| v.len()).sum::<usize>();
+    let n_regions = regions_map.values().map(|v| v.len()).sum::<usize>();
     let chroms = get_chrom_names(&args.bamfile)?;
     for chrom in chroms {
-        if !regions_map.contains_key(&chrom) {
-            regions_map.insert(chrom, Vec::new());
-        }
+        regions_map.entry(chrom).or_default();
     }
     eprintln!(
         "Counting {} exon regions on {} chromosomes",
