@@ -239,7 +239,7 @@ fn main() -> Result<(), Error> {
     println!("## Filtered flag: {}", args.filtered_flag);
     println!("## GTF file: {}", args.gtf.display());
     println!("## BAM file: {}", args.bamfile.display());
-    println!("Category\tAccepted\tRejected\tTotal");
+    println!("#Category\tAccepted\tRejected\tTotal");
     println!(
         "Exon\t{}\t{}\t{}",
         exon_reads.accepted,
