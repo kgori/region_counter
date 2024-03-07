@@ -1,10 +1,10 @@
 use crate::regions::{sort_regions_in_place, Region};
+use anyhow::Error;
 use csv::Reader;
 use flate2::read::MultiGzDecoder;
 use std::fs::File;
 use std::io::BufReader;
 use std::path::PathBuf;
-use anyhow::Error;
 
 pub struct GtfFile {
     pub path: PathBuf,

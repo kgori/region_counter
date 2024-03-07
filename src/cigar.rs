@@ -236,13 +236,14 @@ mod tests {
             vec![('S', 1), ('M', 76), ('N', 3329), ('M', 24)],
             61_826_914,
         );
-        let second_in_pair = mock_record(
-            vec![('S', 2), ('M', 99)],
-            61_845_189,
-        );
-        assert!(check_cigar_overlap(&first_in_pair, 61_845_189, 61_845_296) ||
-            check_cigar_overlap(&first_in_pair, 61_830_319, 61_830_481)); // Overlaps within the match
-        assert!(check_cigar_overlap(&second_in_pair, 61_845_189, 61_845_296) ||
-            check_cigar_overlap(&second_in_pair, 61_830_319, 61_830_481)); // Overlaps within the match
+        let second_in_pair = mock_record(vec![('S', 2), ('M', 99)], 61_845_189);
+        assert!(
+            check_cigar_overlap(&first_in_pair, 61_845_189, 61_845_296)
+                || check_cigar_overlap(&first_in_pair, 61_830_319, 61_830_481)
+        ); // Overlaps within the match
+        assert!(
+            check_cigar_overlap(&second_in_pair, 61_845_189, 61_845_296)
+                || check_cigar_overlap(&second_in_pair, 61_830_319, 61_830_481)
+        ); // Overlaps within the match
     }
 }

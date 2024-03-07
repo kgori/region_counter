@@ -1,10 +1,10 @@
+use anyhow::Error;
 use cigar::check_cigar_overlap;
 use cli::ProgramOptions;
+use rayon::prelude::*;
 use regions::{compress_regions, convert_regions_vec_to_hashmap, Region};
 use rust_htslib::bam::{IndexedReader, Read, Reader, Record};
 use std::collections::HashMap;
-use rayon::prelude::*;
-use anyhow::Error;
 
 mod cigar;
 mod cli;
@@ -39,7 +39,10 @@ fn get_chrom_names(bamfile: &std::path::Path) -> Result<Vec<String>, Error> {
     let bam = Reader::from_path(bamfile)?;
     let header = bam.header();
     let chroms = header.target_names();
-    let chroms = chroms.iter().map(|x| String::from_utf8(x.to_vec())).collect::<Result<Vec<_>, _>>();
+    let chroms = chroms
+        .iter()
+        .map(|x| String::from_utf8(x.to_vec()))
+        .collect::<Result<Vec<_>, _>>();
     match chroms {
         Ok(chroms) => Ok(chroms),
         Err(e) => Err(Error::msg(format!("Error reading chromosome names: {}", e))),
@@ -72,7 +75,6 @@ fn count_reads(
     while let Some(result) = bam.read(&mut read) {
         match result {
             Ok(_) => {
-
                 if read.flags() & FLAGS_ALWAYS_FILTERED != 0 {
                     continue;
                 }
@@ -142,17 +144,26 @@ fn count_mapped_reads(
     args: &ProgramOptions,
     regions: &HashMap<String, Vec<Region>>,
 ) -> Result<(CountResult, CountResult), Error> {
-    let mut all_reads = CountResult { accepted: 0, rejected: 0 };
-    let mut exon_reads = CountResult { accepted: 0, rejected: 0 };
-    
+    let mut all_reads = CountResult {
+        accepted: 0,
+        rejected: 0,
+    };
+    let mut exon_reads = CountResult {
+        accepted: 0,
+        rejected: 0,
+    };
+
     let mut chroms: Vec<_> = regions.keys().collect();
     chroms.sort();
 
-    let results: Vec<Result<(CountResult, CountResult), Error>> = chroms.par_iter().map(|chrom| {
-        eprintln!("Counting reads on chromosome {}", chrom);
-        let regions = regions.get(*chrom).unwrap();
-        count_reads(chrom, regions, args)
-    }).collect();
+    let results: Vec<Result<(CountResult, CountResult), Error>> = chroms
+        .par_iter()
+        .map(|chrom| {
+            eprintln!("Counting reads on chromosome {}", chrom);
+            let regions = regions.get(*chrom).unwrap();
+            count_reads(chrom, regions, args)
+        })
+        .collect();
 
     for result in results {
         let (all, exon) = result?;
@@ -209,19 +220,18 @@ fn main() -> Result<(), Error> {
     let regions = gtf.exon_regions()?;
     let regions = compress_regions(&regions);
     let mut regions_map = convert_regions_vec_to_hashmap(regions);
-    let n_regions = regions_map
-        .iter()
-        .map(|(_, v)| {
-            v.len()
-        })
-        .sum::<usize>();
+    let n_regions = regions_map.iter().map(|(_, v)| v.len()).sum::<usize>();
     let chroms = get_chrom_names(&args.bamfile)?;
     for chrom in chroms {
         if !regions_map.contains_key(&chrom) {
             regions_map.insert(chrom, Vec::new());
         }
     }
-    eprintln!("Counting {} exon regions on {} chromosomes", n_regions, regions_map.len());
+    eprintln!(
+        "Counting {} exon regions on {} chromosomes",
+        n_regions,
+        regions_map.len()
+    );
     let (all_reads, exon_reads) = count_mapped_reads(&args, &regions_map)?;
     let unmapped_reads = count_unmapped_reads(&args)?;
     println!("## Min mapping quality: {}", args.minmapqual);
@@ -230,9 +240,29 @@ fn main() -> Result<(), Error> {
     println!("## GTF file: {}", args.gtf.display());
     println!("## BAM file: {}", args.bamfile.display());
     println!("Category\tAccepted\tRejected\tTotal");
-    println!("Exon\t{}\t{}\t{}", exon_reads.accepted, exon_reads.rejected, exon_reads.accepted + exon_reads.rejected);
-    println!("Mapped\t{}\t{}\t{}", all_reads.accepted, all_reads.rejected, all_reads.accepted + all_reads.rejected);
-    println!("Unmapped\t{}\t{}\t{}", unmapped_reads.accepted, unmapped_reads.rejected, unmapped_reads.accepted + unmapped_reads.rejected);
-    println!("Total\t{}\t{}\t{}", all_reads.accepted + unmapped_reads.accepted, all_reads.rejected + unmapped_reads.rejected, all_reads.accepted + all_reads.rejected + unmapped_reads.accepted + unmapped_reads.rejected);
+    println!(
+        "Exon\t{}\t{}\t{}",
+        exon_reads.accepted,
+        exon_reads.rejected,
+        exon_reads.accepted + exon_reads.rejected
+    );
+    println!(
+        "Mapped\t{}\t{}\t{}",
+        all_reads.accepted,
+        all_reads.rejected,
+        all_reads.accepted + all_reads.rejected
+    );
+    println!(
+        "Unmapped\t{}\t{}\t{}",
+        unmapped_reads.accepted,
+        unmapped_reads.rejected,
+        unmapped_reads.accepted + unmapped_reads.rejected
+    );
+    println!(
+        "Total\t{}\t{}\t{}",
+        all_reads.accepted + unmapped_reads.accepted,
+        all_reads.rejected + unmapped_reads.rejected,
+        all_reads.accepted + all_reads.rejected + unmapped_reads.accepted + unmapped_reads.rejected
+    );
     Ok(())
 }
