@@ -46,6 +46,17 @@ fn check_read(read: &Record, args: &ProgramOptions) -> ReadCheckOutcome {
     ReadCheckOutcome::Accept
 }
 
+fn get_chrom_names(bamfile: &std::path::Path) -> Result<Vec<String>, Error> {
+    let bam = Reader::from_path(bamfile)?;
+    let header = bam.header();
+    let chroms = header.target_names();
+    let chroms = chroms.iter().map(|x| String::from_utf8(x.to_vec())).collect::<Result<Vec<_>, _>>();
+    match chroms {
+        Ok(chroms) => Ok(chroms),
+        Err(e) => Err(Error::msg(format!("Error reading chromosome names: {}", e))),
+    }
+}
+
 fn count_reads(
     chrom: &str,
     regions: &Vec<Region>,
@@ -158,13 +169,19 @@ fn main() -> Result<(), Error> {
     println!("Reading GTF file: {}", args.gtf.display());
     let regions = gtf.exon_regions()?;
     let regions = compress_regions(&regions);
-    let regions_map = convert_regions_vec_to_hashmap(regions);
+    let mut regions_map = convert_regions_vec_to_hashmap(regions);
     let n_regions = regions_map
         .iter()
         .map(|(_, v)| {
             v.len()
         })
         .sum::<usize>();
+    let chroms = get_chrom_names(&args.bamfile)?;
+    for chrom in chroms {
+        if !regions_map.contains_key(&chrom) {
+            regions_map.insert(chrom, Vec::new());
+        }
+    }
     println!("Counting {} exon regions on {} chromosomes", n_regions, regions_map.len());
     let (all_reads, exon_reads) = count_mapped_reads(&args, &regions_map)?;
     let unmapped_reads = count_unmapped_reads(&args)?;
