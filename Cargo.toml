@@ -10,6 +10,5 @@ anyhow = "1.0.80"
 clap = { version = "4.5.1", features = ["derive"] }
 csv = "1.3.0"
 flate2 = "1.0.28"
-pdatastructs = "0.7.0"
 rayon = "1.9.0"
 rust-htslib = { version = "0.45.0", features = ["bzip2", "lzma"], default-features = false }
